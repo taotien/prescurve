@@ -29,7 +29,7 @@ trait Monotonic {
 }
 
 trait Interpolate {
-    fn search_interpolate(&self, x: u32) -> u32;
+    fn search_interpolate(&self, x: &u32) -> u32;
 }
 
 trait Smooth {
@@ -38,7 +38,6 @@ trait Smooth {
         device: &mut (impl DeviceWrite + DeviceRead),
         fps: u8,
     ) -> Result<()> {
-        // TODO fps value from config
         let mut step = diff / fps as i32;
         if step == 0 {
             // for when 0 < step < 1
@@ -49,7 +48,6 @@ trait Smooth {
             return Ok(());
         }
         device.set(TryInto::<u32>::try_into(value)?)?;
-        sleep(Duration::from_millis(1000 / fps as u64)).await;
 
         Ok(())
     }
@@ -112,11 +110,15 @@ struct Curve {
 impl Smooth for Curve {}
 
 impl Interpolate for Curve {
-    fn search_interpolate(&self, x: u32) -> u32 {
-        let (x0, y0) = self.points.range(..x).next_back().unwrap();
-        let (x1, y1) = self.points.range(x..).next().unwrap();
+    fn search_interpolate(&self, x: &u32) -> u32 {
+        if self.points.contains_key(x) {
+            self.points[x]
+        } else {
+            let (x0, y0) = self.points.range(..x).next_back().unwrap();
+            let (x1, y1) = self.points.range(x..).next().unwrap();
 
-        (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
+            (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
+        }
     }
 }
 
@@ -150,6 +152,7 @@ struct Config {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // TODO prompt user for setup (sensor_max)
     let mut config_path = dirs::config_dir().unwrap();
     config_path.push("/prescurve.toml");
     let config: Config = toml::from_str(read_to_string(config_path)?.as_ref())?;
@@ -197,31 +200,36 @@ async fn main() -> Result<()> {
 
     let ambient = Arc::clone(&ambient_arc);
     let average = Arc::clone(&average_arc);
+    let fps = config.fps.unwrap_or(60);
+    let freq = config.sample_frequency.unwrap_or(100);
+    let sample_size = config.sample_size.unwrap_or(10);
     let adjust_retain: JoinHandle<Result<()>> = tokio::spawn(async move {
         loop {
-            if !backlight.changed()? {
-                // let duration;
-                let target = curve.search_interpolate(average.load(Ordering::Acquire));
-                let diff = target as i32 - backlight.get()? as i32;
-                if backlight.get()? != target {
-                    Curve::adjust(diff, &mut backlight, config.fps.unwrap_or(60)).await?;
-                } else {
-                    sleep(Duration::from_millis(
-                        config.sample_frequency.unwrap_or(100) as u64
-                            * config.sample_size.unwrap_or(10) as u64,
-                    ))
-                    .await;
+            let target = curve.search_interpolate(&average.load(Ordering::Acquire));
+            let diff = target as i32 - backlight.get()? as i32;
+            match backlight.changed()? {
+                false => {
+                    if backlight.get()? != target {
+                        Curve::adjust(diff, &mut backlight, fps).await?;
+                        sleep(Duration::from_millis(1000 / fps as u64)).await;
+                    } else {
+                        sleep(Duration::from_millis(freq as u64 * sample_size as u64)).await;
+                    }
                 }
-            } else {
-                sleep(Duration::from_secs(5)).await;
-                let current = backlight.get()?;
+                // backlight was manually/externally adjusted
+                true => {
+                    // TODO read this from config
+                    sleep(Duration::from_secs(5)).await;
+                    let current = backlight.get()?;
 
-                // user requested black screen temporarily, don't save
-                if current == 0 {
-                    continue;
+                    // user requested black screen temporarily, don't save
+                    if current == 0 {
+                        continue;
+                    }
+
+                    backlight.requested = current;
+                    curve.add(average.load(Ordering::Acquire), current, ambient.max);
                 }
-                backlight.requested = current;
-                curve.add(average.load(Ordering::Acquire), current, ambient.max);
             }
         }
     });
