@@ -1,9 +1,8 @@
-#![feature(async_fn_in_trait)]
-
 use std::{
     collections::{BTreeMap, VecDeque},
     fs::{read_to_string, write},
     path::PathBuf,
+    process::exit,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc,
@@ -11,9 +10,9 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::{join, task::JoinHandle, time::sleep};
+use tokio::{task::JoinHandle, time::sleep, try_join};
 
 trait DeviceRead {
     fn get(&self) -> Result<u32>;
@@ -33,14 +32,10 @@ trait Interpolate {
 }
 
 trait Smooth {
-    async fn adjust(
-        diff: i32,
-        device: &mut (impl DeviceWrite + DeviceRead),
-        fps: u8,
-    ) -> Result<()> {
+    fn adjust(diff: i32, device: &mut (impl DeviceWrite + DeviceRead), fps: u8) -> Result<()> {
         let mut step = diff / fps as i32;
         if step == 0 {
-            // for when 0 < step < 1
+            // for when 0 < step < 1 to reach target
             step = if diff > 0 { 1 } else { -1 }
         }
         let value = TryInto::<i32>::try_into(device.get()?)? + step;
@@ -61,13 +56,13 @@ struct Backlight {
 
 impl Backlight {
     fn changed(&self) -> Result<bool> {
-        Ok((self.get().unwrap() - self.requested) != 0)
+        Ok((self.get().unwrap() as i32 - self.requested as i32) != 0)
     }
 }
 
 impl DeviceRead for Backlight {
     fn get(&self) -> Result<u32> {
-        Ok(read_to_string(&self.path)?.parse()?)
+        Ok(read_to_string(&self.path)?.trim().parse()?)
     }
     fn max(&self) -> u32 {
         self.max
@@ -89,7 +84,7 @@ struct Ambient {
 
 impl DeviceRead for Ambient {
     fn get(&self) -> Result<u32> {
-        Ok(read_to_string(&self.path)?.parse()?)
+        Ok(read_to_string(&self.path)?.trim().parse()?)
     }
     fn max(&self) -> u32 {
         self.max
@@ -111,12 +106,23 @@ impl Smooth for Curve {}
 
 impl Interpolate for Curve {
     fn search_interpolate(&self, x: &u32) -> u32 {
+        // println!("{x}");
+        // println!("{:?}", self.points);
         if self.points.contains_key(x) {
             self.points[x]
         } else {
             let (x0, y0) = self.points.range(..x).next_back().unwrap();
+            // let (x0, y0) = match self.points.range(..x).next_back() {
+            //     Some((x, y)) => (x, y),
+            //     None => self.points.first_key_value().unwrap(),
+            // };
             let (x1, y1) = self.points.range(x..).next().unwrap();
+            // let (x1, y1) = match self.points.range(x..).next() {
+            //     Some((x, y)) => (x, y),
+            //     None => self.points.last_key_value().unwrap(),
+            // };
 
+            // println!("({x0}, {y0}), ({x1}, {y1})");
             (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
         }
     }
@@ -146,16 +152,22 @@ struct Config {
     sensor_max: Option<u32>,
 
     fps: Option<u8>,
-    sample_frequency: Option<u8>,
+    sample_frequency: Option<u16>,
     sample_size: Option<u8>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // TODO prompt user for setup (sensor_max)
-    let mut config_path = dirs::config_dir().unwrap();
-    config_path.push("/prescurve.toml");
-    let config: Config = toml::from_str(read_to_string(config_path)?.as_ref())?;
+    // let mut config_path = dirs::config_dir().context("couldn't find config dir")?;
+    let mut config_path = PathBuf::from("/home/tao/.config/");
+    config_path.push("prescurve.toml");
+    let config: Config = toml::from_str(
+        read_to_string(config_path)
+            .context("couldn't find config")?
+            .as_ref(),
+    )
+    .context("couldn't parse config")?;
 
     let mut backlight = Backlight {
         path: PathBuf::from(config.device_path),
@@ -163,7 +175,10 @@ async fn main() -> Result<()> {
         max: if let Some(max) = config.device_max {
             max
         } else {
-            read_to_string(config.device_max_path.clone().unwrap())?.parse()?
+            read_to_string(config.device_max_path.clone().unwrap())
+                .context("couldn't read backlight value")?
+                .trim()
+                .parse()?
         },
     };
     backlight.requested = backlight.get()?;
@@ -178,6 +193,7 @@ async fn main() -> Result<()> {
     let mut points = BTreeMap::new();
     points.insert(0, 1);
     points.insert(ambient_arc.max, backlight.max);
+    // points.insert(ambient_arc.get()?, backlight.get()?);
     let mut curve = Curve { points };
 
     let average = Arc::new(AtomicU32::new(0));
@@ -186,14 +202,22 @@ async fn main() -> Result<()> {
     let ambient = Arc::clone(&ambient_arc);
     let average = Arc::clone(&average_arc);
     let sample: JoinHandle<Result<()>> = tokio::spawn(async move {
-        let duration = Duration::from_millis(config.sample_frequency.unwrap_or(100).into());
+        let duration = Duration::from_millis(config.sample_frequency.unwrap_or(1000).into());
         let mut samples: VecDeque<u32> =
             VecDeque::with_capacity(config.sample_size.unwrap_or(10).into());
+        for _ in 0..10 {
+            samples.push_back(ambient.get()?);
+        }
         loop {
             let sensor = ambient.get()?;
             samples.pop_front();
             samples.push_back(sensor);
-            average.store(samples.iter().sum(), Ordering::Release);
+            // println!("{:?}", samples);
+            average.store(
+                samples.iter().sum::<u32>() / samples.len() as u32,
+                Ordering::Release,
+            );
+            // println!("{}", average.load(Ordering::Relaxed));
             sleep(duration).await;
         }
     });
@@ -210,7 +234,7 @@ async fn main() -> Result<()> {
             match backlight.changed()? {
                 false => {
                     if backlight.get()? != target {
-                        Curve::adjust(diff, &mut backlight, fps).await?;
+                        Curve::adjust(diff, &mut backlight, fps)?;
                         sleep(Duration::from_millis(1000 / fps as u64)).await;
                     } else {
                         sleep(Duration::from_millis(freq as u64 * sample_size as u64)).await;
@@ -234,6 +258,14 @@ async fn main() -> Result<()> {
         }
     });
 
-    let _ = join![sample, adjust_retain];
-    unreachable!()
+    let res = try_join![sample, adjust_retain];
+    match res {
+        Err(e) => {
+            eprintln!("Error occured: {e}");
+            exit(1);
+        }
+        Ok(_) => {
+            unreachable!()
+        }
+    }
 }
