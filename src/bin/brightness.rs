@@ -11,6 +11,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tokio::{task::JoinHandle, time::sleep, try_join};
 
@@ -31,11 +32,26 @@ struct Config {
     sample_size: Option<u8>,
 }
 
+#[derive(Parser)]
+struct Args {
+    config: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Init,
+    Reset,
+    Ignore,
+    // Save,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // TODO prompt user for setup (sensor_max)
-    // let mut config_path = dirs::config_dir().context("couldn't find config dir")?;
-    let mut config_path = PathBuf::from("/home/tao/.config/");
+    let mut config_path = dirs::config_dir().context("couldn't find config dir")?;
     config_path.push("prescurve.toml");
     let config: Config = toml::from_str(
         read_to_string(config_path)
@@ -69,7 +85,11 @@ async fn main() -> Result<()> {
     points.insert(0, 1);
     points.insert(ambient_arc.max, backlight.max);
     // points.insert(ambient_arc.get()?, backlight.get()?);
-    let mut curve = Curve { points };
+
+    let mut curve = Curve {
+        points,
+        cache: None,
+    };
 
     let average = Arc::new(AtomicU32::new(0));
     let average_arc = Arc::clone(&average);
@@ -87,12 +107,10 @@ async fn main() -> Result<()> {
             let sensor = ambient.get()?;
             samples.pop_front();
             samples.push_back(sensor);
-            // println!("{:?}", samples);
             average.store(
                 samples.iter().sum::<u32>() / samples.len() as u32,
                 Ordering::Release,
             );
-            // println!("{}", average.load(Ordering::Relaxed));
             sleep(duration).await;
         }
     });
@@ -104,10 +122,10 @@ async fn main() -> Result<()> {
     let sample_size = config.sample_size.unwrap_or(10);
     let adjust_retain: JoinHandle<Result<()>> = tokio::spawn(async move {
         loop {
-            let target = curve.search_interpolate(&average.load(Ordering::Acquire));
-            let diff = target as i32 - backlight.get()? as i32;
             match backlight.changed()? {
                 false => {
+                    let target = curve.search_interpolate(&average.load(Ordering::Acquire));
+                    let diff = target as i32 - backlight.get()? as i32;
                     if backlight.get()? != target {
                         Curve::adjust(diff, &mut backlight, fps)?;
                         sleep(Duration::from_millis(1000 / fps as u64)).await;
@@ -144,6 +162,7 @@ async fn main() -> Result<()> {
         }
     }
 }
+
 struct Backlight {
     path: PathBuf,
     max: u32,

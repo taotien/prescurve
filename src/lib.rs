@@ -1,18 +1,6 @@
-use std::{
-    collections::{BTreeMap, VecDeque},
-    fs::{read_to_string, write},
-    path::PathBuf,
-    process::exit,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use tokio::{task::JoinHandle, time::sleep, try_join};
+use anyhow::Result;
 
 pub trait DeviceRead {
     fn get(&self) -> Result<u32>;
@@ -50,9 +38,15 @@ pub trait Smooth {
 
 pub struct Curve {
     pub points: BTreeMap<u32, u32>,
+    pub cache: Option<Box<[u32]>>,
 }
 
 impl Smooth for Curve {}
+
+enum Algorithm {
+    Linear,
+    Logarithmic,
+}
 
 impl Interpolate for Curve {
     fn search_interpolate(&self, x: &u32) -> u32 {
@@ -62,17 +56,7 @@ impl Interpolate for Curve {
             self.points[x]
         } else {
             let (x0, y0) = self.points.range(..x).next_back().unwrap();
-            // let (x0, y0) = match self.points.range(..x).next_back() {
-            //     Some((x, y)) => (x, y),
-            //     None => self.points.first_key_value().unwrap(),
-            // };
             let (x1, y1) = self.points.range(x..).next().unwrap();
-            // let (x1, y1) = match self.points.range(x..).next() {
-            //     Some((x, y)) => (x, y),
-            //     None => self.points.last_key_value().unwrap(),
-            // };
-
-            // println!("({x0}, {y0}), ({x1}, {y1})");
             (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
         }
     }
