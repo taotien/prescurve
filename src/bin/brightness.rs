@@ -14,132 +14,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::{task::JoinHandle, time::sleep, try_join};
 
-trait DeviceRead {
-    fn get(&self) -> Result<u32>;
-    fn max(&self) -> u32;
-}
-
-trait DeviceWrite {
-    fn set(&mut self, value: u32) -> Result<()>;
-}
-
-trait Monotonic {
-    fn add(&mut self, key: u32, value: u32, sensor_max: u32);
-}
-
-trait Interpolate {
-    fn search_interpolate(&self, x: &u32) -> u32;
-}
-
-trait Smooth {
-    fn adjust(diff: i32, device: &mut (impl DeviceWrite + DeviceRead), fps: u8) -> Result<()> {
-        let mut step = diff / fps as i32;
-        if step == 0 {
-            // for when 0 < step < 1 to reach target
-            step = if diff > 0 { 1 } else { -1 }
-        }
-        let value = TryInto::<i32>::try_into(device.get()?)? + step;
-        if value < 0 {
-            return Ok(());
-        }
-        device.set(TryInto::<u32>::try_into(value)?)?;
-
-        Ok(())
-    }
-}
-
-struct Backlight {
-    path: PathBuf,
-    max: u32,
-    requested: u32,
-}
-
-impl Backlight {
-    fn changed(&self) -> Result<bool> {
-        Ok((self.get().unwrap() as i32 - self.requested as i32) != 0)
-    }
-}
-
-impl DeviceRead for Backlight {
-    fn get(&self) -> Result<u32> {
-        Ok(read_to_string(&self.path)?.trim().parse()?)
-    }
-    fn max(&self) -> u32 {
-        self.max
-    }
-}
-
-impl DeviceWrite for Backlight {
-    fn set(&mut self, value: u32) -> Result<()> {
-        write(&self.path, value.to_string())?;
-        self.requested = value;
-        Ok(())
-    }
-}
-
-struct Ambient {
-    path: PathBuf,
-    max: u32,
-}
-
-impl DeviceRead for Ambient {
-    fn get(&self) -> Result<u32> {
-        Ok(read_to_string(&self.path)?.trim().parse()?)
-    }
-    fn max(&self) -> u32 {
-        self.max
-    }
-}
-
-impl DeviceWrite for Ambient {
-    fn set(&mut self, value: u32) -> Result<()> {
-        write(&self.path, value.to_string())?;
-        Ok(())
-    }
-}
-
-struct Curve {
-    points: BTreeMap<u32, u32>,
-}
-
-impl Smooth for Curve {}
-
-impl Interpolate for Curve {
-    fn search_interpolate(&self, x: &u32) -> u32 {
-        // println!("{x}");
-        // println!("{:?}", self.points);
-        if self.points.contains_key(x) {
-            self.points[x]
-        } else {
-            let (x0, y0) = self.points.range(..x).next_back().unwrap();
-            // let (x0, y0) = match self.points.range(..x).next_back() {
-            //     Some((x, y)) => (x, y),
-            //     None => self.points.first_key_value().unwrap(),
-            // };
-            let (x1, y1) = self.points.range(x..).next().unwrap();
-            // let (x1, y1) = match self.points.range(x..).next() {
-            //     Some((x, y)) => (x, y),
-            //     None => self.points.last_key_value().unwrap(),
-            // };
-
-            // println!("({x0}, {y0}), ({x1}, {y1})");
-            (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
-        }
-    }
-}
-
-impl Monotonic for Curve {
-    fn add(&mut self, key: u32, value: u32, sensor_max: u32) {
-        self.points.insert(key, value);
-        self.points.iter_mut().for_each(|(k, v)| {
-            if (*k != 0 && *k != sensor_max)
-                && ((*k < key && *v > value) || (*k > key && *v < value))
-            {
-                *v = value
-            }
-        })
-    }
-}
+use prescurve::{Curve, DeviceRead, DeviceWrite, Interpolate, Monotonic, Smooth};
 
 #[derive(Deserialize, Serialize)]
 struct Config {
@@ -267,5 +142,54 @@ async fn main() -> Result<()> {
         Ok(_) => {
             unreachable!()
         }
+    }
+}
+struct Backlight {
+    path: PathBuf,
+    max: u32,
+    requested: u32,
+}
+
+impl Backlight {
+    fn changed(&self) -> Result<bool> {
+        Ok((self.get().unwrap() as i32 - self.requested as i32) != 0)
+    }
+}
+
+impl DeviceRead for Backlight {
+    fn get(&self) -> Result<u32> {
+        Ok(read_to_string(&self.path)?.trim().parse()?)
+    }
+    fn max(&self) -> u32 {
+        self.max
+    }
+}
+
+impl DeviceWrite for Backlight {
+    fn set(&mut self, value: u32) -> Result<()> {
+        write(&self.path, value.to_string())?;
+        self.requested = value;
+        Ok(())
+    }
+}
+
+struct Ambient {
+    path: PathBuf,
+    max: u32,
+}
+
+impl DeviceRead for Ambient {
+    fn get(&self) -> Result<u32> {
+        Ok(read_to_string(&self.path)?.trim().parse()?)
+    }
+    fn max(&self) -> u32 {
+        self.max
+    }
+}
+
+impl DeviceWrite for Ambient {
+    fn set(&mut self, value: u32) -> Result<()> {
+        write(&self.path, value.to_string())?;
+        Ok(())
     }
 }
