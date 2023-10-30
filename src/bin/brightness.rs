@@ -94,9 +94,15 @@ async fn main() -> Result<()> {
     let ambient_arc = Arc::new(ambient);
 
     let mut points = BTreeMap::new();
-    points.insert(0, 1);
-    points.insert(ambient_arc.max, backlight.max);
-    // points.insert(ambient_arc.get()?, backlight.get()?);
+    let config_clone = config.clone();
+    if let (Some(k), Some(v)) = (config_clone.curve_keys, config_clone.curve_values) {
+        for (k, v) in k.iter().zip(v.iter()) {
+            points.insert(*k, *v);
+        }
+    } else {
+        points.insert(0, 1);
+        points.insert(ambient_arc.max, backlight.max);
+    }
     let mut curve = Curve {
         points,
         cache: Box::new([0]),
@@ -168,7 +174,6 @@ async fn main() -> Result<()> {
                         .collect();
                     curve.cache = cache.into_boxed_slice();
 
-                    println!("saving config!");
                     let mut config = config.clone();
                     let curve = curve.points.clone();
                     let keys = curve.keys().copied().collect();
@@ -176,9 +181,7 @@ async fn main() -> Result<()> {
 
                     config.curve_keys = Some(keys);
                     config.curve_values = Some(values);
-                    println!("{:?}", config);
                     let toml = toml::to_string(&config)?;
-                    println!("{}", toml);
                     let mut f = File::create(&config_path)?;
                     f.write_all(toml.as_bytes())?;
                 }
