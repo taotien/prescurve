@@ -85,11 +85,14 @@ async fn main() -> Result<()> {
     points.insert(0, 1);
     points.insert(ambient_arc.max, backlight.max);
     // points.insert(ambient_arc.get()?, backlight.get()?);
-
     let mut curve = Curve {
         points,
-        cache: None,
+        cache: Box::new([0]),
     };
+    let cache: Vec<u32> = (0..=ambient_arc.max)
+        .map(|x| curve.search_interpolate(&x))
+        .collect();
+    curve.cache = cache.into_boxed_slice();
 
     let average = Arc::new(AtomicU32::new(0));
     let average_arc = Arc::clone(&average);
@@ -124,9 +127,10 @@ async fn main() -> Result<()> {
         loop {
             match backlight.changed()? {
                 false => {
-                    let target = curve.search_interpolate(&average.load(Ordering::Acquire));
-                    let diff = target as i32 - backlight.get()? as i32;
+                    let sensor = average.load(Ordering::Acquire);
+                    let target = curve.cache[sensor as usize];
                     if backlight.get()? != target {
+                        let diff = target as i32 - backlight.get()? as i32;
                         Curve::adjust(diff, &mut backlight, fps)?;
                         sleep(Duration::from_millis(1000 / fps as u64)).await;
                     } else {
@@ -146,6 +150,11 @@ async fn main() -> Result<()> {
 
                     backlight.requested = current;
                     curve.add(average.load(Ordering::Acquire), current, ambient.max);
+
+                    let cache: Vec<u32> = (0..=ambient_arc.max)
+                        .map(|x| curve.search_interpolate(&x))
+                        .collect();
+                    curve.cache = cache.into_boxed_slice();
                 }
             }
         }

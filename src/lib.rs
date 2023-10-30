@@ -38,7 +38,7 @@ pub trait Smooth {
 
 pub struct Curve {
     pub points: BTreeMap<u32, u32>,
-    pub cache: Option<Box<[u32]>>,
+    pub cache: Box<[u32]>,
 }
 
 impl Smooth for Curve {}
