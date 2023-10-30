@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    fs::{read_to_string, write},
+    fs::{read_to_string, write, File},
+    io::Write,
     path::PathBuf,
     process::exit,
     sync::{
@@ -14,10 +15,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tokio::{task::JoinHandle, time::sleep, try_join};
+use toml::value::Array;
 
 use prescurve::{Curve, DeviceRead, DeviceWrite, Interpolate, Monotonic, Smooth};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct Config {
     device_path: String,
     device_max_path: Option<String>,
@@ -30,6 +32,9 @@ struct Config {
     fps: Option<u8>,
     sample_frequency: Option<u16>,
     sample_size: Option<u8>,
+
+    curve_keys: Option<Vec<u32>>,
+    curve_values: Option<Vec<u32>>,
 }
 
 #[derive(Parser)]
@@ -54,14 +59,14 @@ async fn main() -> Result<()> {
     let mut config_path = dirs::config_dir().context("couldn't find config dir")?;
     config_path.push("prescurve.toml");
     let config: Config = toml::from_str(
-        read_to_string(config_path)
+        read_to_string(&config_path)
             .context("couldn't find config")?
             .as_ref(),
     )
     .context("couldn't parse config")?;
 
     let mut backlight = Backlight {
-        path: PathBuf::from(config.device_path),
+        path: PathBuf::from(&config.device_path),
         requested: 0,
         max: if let Some(max) = config.device_max {
             max
@@ -75,9 +80,16 @@ async fn main() -> Result<()> {
     backlight.requested = backlight.get()?;
 
     let ambient = Ambient {
-        path: PathBuf::from(config.sensor_path),
+        path: PathBuf::from(&config.sensor_path),
         // TODO read this from config and/or prompt user (setup wizard?)
-        max: 3355,
+        max: if let Some(max) = config.sensor_max {
+            max
+        } else {
+            read_to_string(config.sensor_max_path.clone().unwrap())
+                .context("couldn't read backlight value")?
+                .trim()
+                .parse()?
+        },
     };
     let ambient_arc = Arc::new(ambient);
 
@@ -155,6 +167,20 @@ async fn main() -> Result<()> {
                         .map(|x| curve.search_interpolate(&x))
                         .collect();
                     curve.cache = cache.into_boxed_slice();
+
+                    println!("saving config!");
+                    let mut config = config.clone();
+                    let curve = curve.points.clone();
+                    let keys = curve.keys().copied().collect();
+                    let values = curve.values().copied().collect();
+
+                    config.curve_keys = Some(keys);
+                    config.curve_values = Some(values);
+                    println!("{:?}", config);
+                    let toml = toml::to_string(&config)?;
+                    println!("{}", toml);
+                    let mut f = File::create(&config_path)?;
+                    f.write_all(toml.as_bytes())?;
                 }
             }
         }
