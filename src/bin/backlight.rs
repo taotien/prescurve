@@ -15,7 +15,6 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tokio::{task::JoinHandle, time::sleep, try_join};
-use toml::value::Array;
 
 use prescurve::{Curve, DeviceRead, DeviceWrite, Interpolate, Monotonic, Smooth};
 
@@ -32,6 +31,7 @@ struct Config {
     fps: Option<u8>,
     sample_frequency: Option<u16>,
     sample_size: Option<u8>,
+    manual_adjust_wait: Option<u64>,
 
     curve_keys: Option<Vec<u32>>,
     curve_values: Option<Vec<u32>>,
@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
                 // backlight was manually/externally adjusted
                 true => {
                     // TODO read this from config
-                    sleep(Duration::from_secs(5)).await;
+                    sleep(Duration::from_secs(config.manual_adjust_wait.unwrap_or(10))).await;
                     let current = backlight.get()?;
 
                     // user requested black screen temporarily, don't save
@@ -190,6 +190,7 @@ async fn main() -> Result<()> {
     });
 
     let res = try_join![sample, adjust_retain];
+    // FIXME this doesn't seem to actually handle panics in loop?
     match res {
         Err(e) => {
             eprintln!("Error occured: {e}");
