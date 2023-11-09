@@ -1,3 +1,8 @@
+//! Traits for creating smooth hardware curves.
+//!
+//! API is not stable! Currently only used for prescurve-backlight. Hopefully in
+//! the future these can be generic over any type that a sensor and device exposes.
+
 use std::collections::BTreeMap;
 
 use anyhow::Result;
@@ -11,6 +16,7 @@ pub trait DeviceWrite {
     fn set(&mut self, value: u32) -> Result<()>;
 }
 
+/// Make sure that the curve does not have dips or peaks.
 pub trait Monotonic {
     fn add(&mut self, key: u32, value: u32, sensor_max: u32);
 }
@@ -26,10 +32,7 @@ pub trait Smooth {
             // for when 0 < step < 1 to reach target
             step = if diff > 0 { 1 } else { -1 }
         }
-        let value = TryInto::<i32>::try_into(device.get()?)? + step;
-        if value < 0 {
-            return Ok(());
-        }
+        let value = device.get()?.saturating_add_signed(step);
         device.set(TryInto::<u32>::try_into(value)?)?;
 
         Ok(())
@@ -50,8 +53,6 @@ enum Algorithm {
 
 impl Interpolate for Curve {
     fn search_interpolate(&self, x: &u32) -> u32 {
-        // println!("{x}");
-        // println!("{:?}", self.points);
         if self.points.contains_key(x) {
             self.points[x]
         } else {
