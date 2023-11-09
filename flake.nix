@@ -26,7 +26,7 @@
           default = packages.prescurve;
         };
         apps = rec {
-          prescurve-backlight = { type = "app"; program = "${packages.default}/bin/cargo2nix"; };
+          prescurve-backlight = { type = "app"; program = "${packages.default}/bin/prescurve-backlight"; };
           default = prescurve-backlight;
         };
       }
