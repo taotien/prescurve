@@ -22,8 +22,8 @@
       rec {
         packages = {
           # replace hello-world with your package name
-          prescurve-backlight = (rustPkgs.workspace.prescurve-backlight { });
-          default = packages.prescurve-backlight;
+          prescurve = (rustPkgs.workspace.prescurve { });
+          default = packages.prescurve;
         };
       }
     );
