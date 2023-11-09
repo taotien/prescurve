@@ -21,8 +21,6 @@
       in
       rec {
         packages = {
-          x86_64-linux.prescurve = (rustPkgs.workspace.prescurve { });
-          x86_64-linux.default = packages.x86_64-linux.prescurve;
           # replace hello-world with your package name
           prescurve = (rustPkgs.workspace.prescurve { });
           default = packages.prescurve;
@@ -30,9 +28,6 @@
         apps = rec {
           prescurve-backlight = { type = "app"; program = "${packages.default}/bin/cargo2nix"; };
           default = prescurve-backlight;
-        };
-        nixosModules = {
-          prescurve-backlight = { config }: { };
         };
       }
     );
