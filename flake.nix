@@ -25,6 +25,10 @@
           prescurve = (rustPkgs.workspace.prescurve { });
           default = packages.prescurve;
         };
+        apps = rec {
+          prescurve-backlight = { type = "app"; program = "${packages.default}/bin/cargo2nix"; };
+          default = prescurve-backlight;
+        };
       }
     );
 }
