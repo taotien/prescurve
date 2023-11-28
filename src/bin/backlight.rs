@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    fs::{read_to_string, write, File},
+    fs::{read_to_string, File},
     io::Write,
     path::PathBuf,
     process::exit,
@@ -16,7 +16,8 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tokio::{task::JoinHandle, time::sleep, try_join};
 
-use prescurve::{Curve, DeviceRead, DeviceWrite, Interpolate, Monotonic, Smooth};
+use prescurve::devices::{Ambient, Backlight};
+use prescurve::{Curve, DeviceRead, Interpolate, Monotonic, Smooth};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Config {
@@ -199,55 +200,5 @@ async fn main() -> Result<()> {
         Ok(_) => {
             unreachable!()
         }
-    }
-}
-
-struct Backlight {
-    path: PathBuf,
-    max: u32,
-    requested: u32,
-}
-
-impl Backlight {
-    fn changed(&self) -> Result<bool> {
-        Ok((self.get().unwrap() as i32 - self.requested as i32) != 0)
-    }
-}
-
-impl DeviceRead for Backlight {
-    fn get(&self) -> Result<u32> {
-        Ok(read_to_string(&self.path)?.trim().parse()?)
-    }
-    fn max(&self) -> u32 {
-        self.max
-    }
-}
-
-impl DeviceWrite for Backlight {
-    fn set(&mut self, value: u32) -> Result<()> {
-        write(&self.path, value.to_string())?;
-        self.requested = value;
-        Ok(())
-    }
-}
-
-struct Ambient {
-    path: PathBuf,
-    max: u32,
-}
-
-impl DeviceRead for Ambient {
-    fn get(&self) -> Result<u32> {
-        Ok(read_to_string(&self.path)?.trim().parse()?)
-    }
-    fn max(&self) -> u32 {
-        self.max
-    }
-}
-
-impl DeviceWrite for Ambient {
-    fn set(&mut self, value: u32) -> Result<()> {
-        write(&self.path, value.to_string())?;
-        Ok(())
     }
 }

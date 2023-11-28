@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 
+pub mod devices;
+
 pub trait DeviceRead {
     fn get(&self) -> Result<u32>;
     fn max(&self) -> u32;
