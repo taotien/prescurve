@@ -1,8 +1,3 @@
-//! Traits for creating smooth hardware curves.
-//!
-//! API is not stable! Currently only used for prescurve-backlight. Hopefully in
-//! the future these can be generic over any type that a sensor and device exposes.
-
 use std::collections::BTreeMap;
 
 use anyhow::Result;
@@ -18,7 +13,8 @@ pub trait DeviceWrite {
     fn set(&mut self, value: u32) -> Result<()>;
 }
 
-/// Make sure that the curve does not have dips or peaks.
+/// Raises dips and lowers peaks for a curve so that it's always increasing or
+/// the same at each sensor value
 pub trait Monotonic {
     fn add(&mut self, key: u32, value: u32, sensor_max: u32);
 }
@@ -30,6 +26,7 @@ pub trait Interpolate {
 pub trait Smooth {
     fn adjust(diff: i32, device: &mut (impl DeviceWrite + DeviceRead), fps: u8) -> Result<()> {
         let mut step = diff / fps as i32;
+        // TODO this is probably causing the flickering
         if step == 0 {
             // for when 0 < step < 1 to reach target
             step = if diff > 0 { 1 } else { -1 }
@@ -77,3 +74,5 @@ impl Monotonic for Curve {
         })
     }
 }
+
+pub fn monotonic_insert<K, V>(curve: &mut Vec<(K, V)>, key: K, value: V, sensor_max: K) {}
