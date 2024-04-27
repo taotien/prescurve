@@ -17,3 +17,7 @@ toml = "0.8.2"
 [[bin]]
 name = "prescurve-backlight"
 path = "src/bin/backlight.rs"
+
+[[bin]]
+name = "rewrite"
+path = "src/bin/rewrite.rs"
