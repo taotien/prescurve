@@ -13,30 +13,11 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use serde::{Deserialize, Serialize};
 use tokio::{task::JoinHandle, time::sleep, try_join};
 
 use prescurve::devices::{Ambient, Backlight};
+use prescurve::Config;
 use prescurve::{Curve, DeviceRead, Interpolate, Monotonic, Smooth};
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct Config {
-    device_path: String,
-    device_max_path: Option<String>,
-    device_max: Option<u32>,
-
-    sensor_path: String,
-    sensor_max_path: Option<String>,
-    sensor_max: Option<u32>,
-
-    fps: Option<u8>,
-    sample_frequency: Option<u16>,
-    sample_size: Option<u8>,
-    manual_adjust_wait: Option<u64>,
-
-    curve_keys: Option<Vec<u32>>,
-    curve_values: Option<Vec<u32>>,
-}
 
 #[derive(Parser)]
 struct Args {

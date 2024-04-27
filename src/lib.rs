@@ -1,8 +1,28 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 pub mod devices;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Config {
+    pub device_path: String,
+    pub device_max_path: Option<String>,
+    pub device_max: Option<u32>,
+
+    pub sensor_path: String,
+    pub sensor_max_path: Option<String>,
+    pub sensor_max: Option<u32>,
+
+    pub fps: Option<u8>,
+    pub sample_frequency: Option<u16>,
+    pub sample_size: Option<u8>,
+    pub manual_adjust_wait: Option<u64>,
+
+    pub curve_keys: Option<Vec<u32>>,
+    pub curve_values: Option<Vec<u32>>,
+}
 
 pub trait DeviceRead {
     fn get(&self) -> Result<u32>;
