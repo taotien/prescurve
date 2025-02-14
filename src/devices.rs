@@ -7,6 +7,7 @@ use std::{
 
 use crate::{DeviceRead, DeviceWrite};
 
+#[derive(Debug)]
 pub struct Backlight {
     pub path: PathBuf,
     pub max: u32,
@@ -36,6 +37,7 @@ impl DeviceWrite for Backlight {
     }
 }
 
+#[derive(Debug)]
 pub struct Ambient {
     pub path: PathBuf,
     pub max: u32,

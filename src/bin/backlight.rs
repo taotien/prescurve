@@ -13,6 +13,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use log::{debug, info, trace};
 use tokio::{task::JoinHandle, time::sleep, try_join};
 
 use prescurve::devices::{Ambient, Backlight};
@@ -37,6 +38,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
+
     // TODO prompt user for setup (sensor_max)
     let mut config_path = dirs::config_dir().context("couldn't find config dir")?;
     config_path.push("prescurve.toml");
@@ -46,6 +49,8 @@ async fn main() -> Result<()> {
             .as_ref(),
     )
     .context("couldn't parse config")?;
+    info!("Loaded config.");
+    debug!("{:?}", config);
 
     let mut backlight = Backlight {
         path: PathBuf::from(&config.device_path),
@@ -60,6 +65,8 @@ async fn main() -> Result<()> {
         },
     };
     backlight.requested = backlight.get()?;
+    info!("Init backlight.");
+    debug!("{:?}", backlight);
 
     let ambient = Ambient {
         path: PathBuf::from(&config.sensor_path),
@@ -74,6 +81,8 @@ async fn main() -> Result<()> {
         },
     };
     let ambient_arc = Arc::new(ambient);
+    info!("Init ambient light sensor.");
+    debug!("{:?}", ambient_arc);
 
     let mut points = BTreeMap::new();
     let config_clone = config.clone();
@@ -100,6 +109,7 @@ async fn main() -> Result<()> {
     let ambient = Arc::clone(&ambient_arc);
     let average = Arc::clone(&average_arc);
     let sample: JoinHandle<Result<()>> = tokio::spawn(async move {
+        trace!("enter sample block");
         let duration = Duration::from_millis(config.sample_frequency.unwrap_or(1000).into());
         let mut samples: VecDeque<u32> =
             VecDeque::with_capacity(config.sample_size.unwrap_or(10).into());
@@ -107,12 +117,13 @@ async fn main() -> Result<()> {
             samples.push_back(ambient.get()?);
         }
         loop {
+            trace!("sample loop");
             let sensor = ambient.get()?;
             samples.pop_front();
             samples.push_back(sensor);
             average.store(
                 samples.iter().sum::<u32>() / samples.len() as u32,
-                Ordering::Release,
+                Ordering::Relaxed,
             );
             sleep(duration).await;
         }
@@ -125,9 +136,12 @@ async fn main() -> Result<()> {
     let sample_size = config.sample_size.unwrap_or(10);
     let adjust_retain: JoinHandle<Result<()>> = tokio::spawn(async move {
         loop {
+            trace!("adj retain");
             match backlight.changed()? {
                 false => {
-                    let sensor = average.load(Ordering::Acquire);
+                    trace!("bl unchanged");
+                    let sensor = average.load(Ordering::Relaxed);
+                    trace!("load sensor");
                     let target = curve.cache[sensor as usize];
                     if backlight.get()? != target {
                         let diff = target as i32 - backlight.get()? as i32;
@@ -139,6 +153,7 @@ async fn main() -> Result<()> {
                 }
                 // backlight was manually/externally adjusted
                 true => {
+                    trace!("bl changed");
                     // TODO read this from config
                     sleep(Duration::from_secs(config.manual_adjust_wait.unwrap_or(10))).await;
                     let current = backlight.get()?;
