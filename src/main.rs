@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
+use industrial_io as iio;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 struct Args {
-    config: Option<PathBuf>,
-
     #[command(subcommand)]
     command: Commands,
 }
@@ -23,14 +23,17 @@ struct Config {
     target: Vec<Device>,
 }
 
+/// pick one of iio_device, paths, or command
 #[derive(Serialize, Deserialize)]
 struct Device {
+    /// iio_device
+    iio_device: Option<String>,
+    /// paths
     path: Option<PathBuf>,
     max_path: Option<PathBuf>,
-
-    command: Option<String>,
-    args: Option<Vec<String>>,
-
+    // /// command
+    // command: Option<String>,
+    // args: Option<Vec<String>>,
     max: Option<u32>,
     min: Option<u32>,
 
@@ -41,7 +44,8 @@ struct Device {
     curve: Option<Vec<u32>>,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let args = Args::parse();
@@ -52,4 +56,12 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn find_device() -> anyhow::Result<Device> {
+    // TODO better help messages
+    let ctx = iio::context::Context::new()
+        .context("Couldn't create iio context. Do you have iio enabled in kernel?")?;
+
+    todo!()
 }

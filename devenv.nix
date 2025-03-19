@@ -9,7 +9,9 @@
   # env.GREET = "devenv";
 
   # https://devenv.sh/packages/
-  packages = with pkgs; [];
+  packages = with pkgs; [
+    libiio
+  ];
 
   # https://devenv.sh/languages/
   # languages.rust.enable = true;
